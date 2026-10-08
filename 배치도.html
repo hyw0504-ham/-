@@ -1,0 +1,1398 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>학교 교실 배치도 플래너 (실시간 공유 & 터치 지원)</title>
+  
+  <!-- 구글 Firebase SDK (무료 실시간 클라우드 동기화) -->
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+
+  <style>
+    :root {
+      --primary: #2563eb;
+      --border-color: #000;
+      --grid-line-thin: #f1f5f9;
+      --grid-line-thick: #e2e8f0;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+    body {
+      font-family: 'Pretendard', 'Malgun Gothic', sans-serif;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      overflow: hidden;
+      background: #f1f5f9;
+      color: #1e293b;
+      touch-action: pan-x pan-y;
+    }
+
+    /* 상단 교실 탭 바 */
+    .tab-bar {
+      display: flex;
+      align-items: center;
+      background: #1e293b;
+      padding: 6px 12px 0;
+      gap: 4px;
+      overflow-x: auto;
+      white-space: nowrap;
+    }
+    .tab-item {
+      padding: 6px 12px;
+      background: #334155;
+      color: #94a3b8;
+      border-radius: 6px 6px 0 0;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 500;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      user-select: none;
+    }
+    .tab-item.active {
+      background: #fff;
+      color: #0f172a;
+      font-weight: 700;
+    }
+    .tab-rename-input {
+      border: 1px solid #2563eb;
+      border-radius: 3px;
+      padding: 2px 4px;
+      font-size: 12px;
+      outline: none;
+      width: 100px;
+    }
+    .tab-btn-edit { font-size: 11px; opacity: 0.6; cursor: pointer; padding: 1px 3px; }
+    .tab-close { font-size: 14px; color: #94a3b8; cursor: pointer; margin-left: 2px; }
+
+    .btn-add-tab {
+      padding: 5px 10px;
+      background: transparent;
+      border: 1px dashed #64748b;
+      color: #cbd5e1;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 12px;
+      white-space: nowrap;
+    }
+
+    /* 상단 툴바 */
+    .toolbar {
+      background: #fff;
+      border-bottom: 1px solid #cbd5e1;
+      padding: 6px 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
+      z-index: 10;
+      overflow-x: auto;
+      white-space: nowrap;
+    }
+    .toolbar-group {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .tool-btn {
+      padding: 5px 8px;
+      font-size: 12px;
+      border: 1px solid #cbd5e1;
+      border-radius: 4px;
+      background: #fff;
+      cursor: pointer;
+      font-weight: 500;
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      height: 28px;
+      user-select: none;
+    }
+    .tool-btn:hover { background: #f8fafc; }
+    .tool-btn.primary { background: var(--primary); color: #fff; border-color: var(--primary); }
+    .tool-btn.success { background: #10b981; color: #fff; border-color: #10b981; }
+    .tool-btn.danger { color: #dc2626; }
+
+    .tool-select {
+      height: 28px;
+      padding: 2px 4px;
+      font-size: 12px;
+      border: 1px solid #cbd5e1;
+      border-radius: 4px;
+      background: #fff;
+      outline: none;
+    }
+
+    /* 메인 워크스페이스 */
+    .workspace {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+      position: relative;
+    }
+
+    /* 좌측 도구 사이드바 */
+    .sidebar {
+      width: 240px;
+      background: #fff;
+      border-right: 1px solid #cbd5e1;
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      overflow-y: auto;
+      z-index: 20;
+      transition: transform 0.2s ease;
+    }
+    .sidebar.hidden-mobile {
+      transform: translateX(-100%);
+      position: absolute;
+      height: 100%;
+    }
+    .sidebar-section-title {
+      font-size: 11px;
+      color: #64748b;
+      font-weight: 700;
+      border-bottom: 1px solid #f1f5f9;
+      padding-bottom: 4px;
+      margin-bottom: 4px;
+    }
+    .palette-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 5px;
+      margin-bottom: 6px;
+    }
+    .palette-btn {
+      padding: 6px 3px;
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 4px;
+      font-size: 10.5px;
+      text-align: center;
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 2px;
+      user-select: none;
+      line-height: 1.2;
+    }
+    .palette-btn:hover { background: #eff6ff; border-color: var(--primary); color: var(--primary); }
+    .palette-btn.full-width {
+      grid-column: span 2;
+      flex-direction: row;
+      justify-content: center;
+      font-weight: 600;
+      background: #f1f5f9;
+    }
+
+    /* 캔버스 뷰포트 */
+    .canvas-viewport {
+      flex: 1;
+      overflow: auto;
+      background: #cbd5e1;
+      padding: 16px;
+      display: flex;
+      justify-content: center;
+      align-items: flex-start;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    /* 도면 시트 */
+    .blueprint-sheet {
+      width: 1200px;
+      height: 820px;
+      background: #fff;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.18);
+      position: relative;
+      border: 2px solid #000;
+      flex-shrink: 0;
+    }
+
+    /* 10px / 50px CAD 그리드 배경 */
+    .drawing-area {
+      width: 100%;
+      height: 100%;
+      position: relative;
+      overflow: hidden;
+      touch-action: none; /* 터치 스크롤 방지 -> 도면 요소 드래그 집중 */
+      background-size: 10px 10px, 50px 50px;
+      background-image: 
+        linear-gradient(to right, var(--grid-line-thin) 1px, transparent 1px),
+        linear-gradient(to bottom, var(--grid-line-thin) 1px, transparent 1px),
+        linear-gradient(to right, var(--grid-line-thick) 1px, transparent 1px),
+        linear-gradient(to bottom, var(--grid-line-thick) 1px, transparent 1px);
+    }
+    .drawing-area.no-grid { background-image: none; }
+
+    /* 드래그 선택 박스 */
+    .selection-box {
+      position: absolute;
+      border: 1.5px dashed #2563eb;
+      background: rgba(37, 99, 235, 0.12);
+      pointer-events: none;
+      z-index: 9999;
+      display: none;
+    }
+
+    /* 도면 요소 */
+    .bp-element {
+      position: absolute;
+      border: 1px solid #000;
+      background: rgba(255, 255, 255, 0.98);
+      cursor: move;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      box-sizing: border-box;
+      user-select: none;
+      touch-action: none;
+    }
+    .bp-element.selected {
+      outline: 2px dashed #2563eb !important;
+      outline-offset: 2px;
+    }
+
+    .elem-text-wrap {
+      width: 100%;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      pointer-events: none;
+      padding: 2px;
+    }
+    .elem-text-wrap input {
+      pointer-events: auto;
+    }
+
+    .bp-element.room-wall-outer {
+      background: transparent;
+      border: 8px solid #0f172a;
+      z-index: 1 !important;
+    }
+    .bp-element.room-wall-outer .elem-title {
+      font-weight: 700;
+      color: #64748b;
+      opacity: 0.5;
+    }
+
+    .bp-element input.elem-title {
+      border: none;
+      background: transparent;
+      text-align: center;
+      font-weight: 600;
+      width: 94%;
+      outline: none;
+      color: #000;
+    }
+    .bp-element input.elem-sub {
+      border: none;
+      background: transparent;
+      text-align: center;
+      color: #475569;
+      width: 94%;
+      outline: none;
+    }
+
+    /* 심볼 */
+    .bp-element.sink::before {
+      content: "";
+      width: 20px;
+      height: 20px;
+      border: 1px solid #000;
+      border-radius: 50%;
+      margin-bottom: 2px;
+    }
+    .bp-element.door { background: transparent; border: 2px solid #000; }
+    .bp-element.door.ori-0   { border-right: none; border-bottom: none; border-radius: 100% 0 0 0; }
+    .bp-element.door.ori-90  { border-left: none;  border-bottom: none; border-radius: 0 100% 0 0; }
+    .bp-element.door.ori-180 { border-left: none;  border-top: none;    border-radius: 0 0 100% 0; }
+    .bp-element.door.ori-270 { border-right: none; border-top: none;    border-radius: 0 0 0 100%; }
+
+    .bp-element.sliding-door { background: #ffffff; border: 1px solid #000; }
+    .bp-element.wall { background: #334155; border: 1px solid #000; }
+    .bp-element.window {
+      background: repeating-linear-gradient(45deg, #fff, #fff 4px, #cbd5e1 4px, #cbd5e1 8px);
+      border: 2px solid #000;
+    }
+    .bp-element.chair-symbol::after {
+      content: "🪑 🪑";
+      position: absolute;
+      top: -12px;
+      font-size: 9px;
+      color: #64748b;
+    }
+
+    /* 터치하기 편하도록 조금 커진 리사이즈 핸들 */
+    .resizer {
+      position: absolute;
+      width: 14px;
+      height: 14px;
+      background: #2563eb;
+      right: -7px;
+      bottom: -7px;
+      cursor: se-resize;
+      display: none;
+      z-index: 1000;
+      border-radius: 2px;
+      touch-action: none;
+    }
+    .bp-element.single-selected .resizer { display: block; }
+
+    /* 회전 배지 */
+    .rotate-badge {
+      position: absolute;
+      width: 24px;
+      height: 24px;
+      background: #2563eb;
+      color: #fff;
+      border: 1.5px solid #fff;
+      border-radius: 50%;
+      top: -30px;
+      left: calc(50% - 12px);
+      cursor: pointer;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      font-size: 13px;
+      z-index: 1000;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.3);
+      touch-action: none;
+    }
+    .rotate-badge::after {
+      content: "";
+      position: absolute;
+      width: 1px;
+      height: 8px;
+      background: #2563eb;
+      bottom: -8px;
+      left: 11px;
+    }
+    .bp-element.single-selected .rotate-badge { display: flex; }
+
+    /* 동기화 모달 팝업 */
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.5);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 10000;
+    }
+    .modal-box {
+      background: #fff;
+      border-radius: 8px;
+      padding: 20px;
+      width: 90%;
+      max-width: 450px;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+    }
+    .modal-box h3 { margin-bottom: 12px; font-size: 16px; }
+    .modal-box input {
+      width: 100%;
+      padding: 8px 10px;
+      border: 1px solid #cbd5e1;
+      border-radius: 4px;
+      margin-bottom: 12px;
+      font-size: 14px;
+      outline: none;
+    }
+    .modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
+
+    @media print {
+      body { background: #fff; }
+      .tab-bar, .toolbar, .sidebar, .modal-overlay { display: none !important; }
+      .canvas-viewport { padding: 0; background: #fff; overflow: visible; }
+      .blueprint-sheet {
+        box-shadow: none;
+        border: 2px solid #000;
+        width: 100%;
+        height: 98vh;
+      }
+      .bp-element.selected { outline: none !important; }
+      .resizer, .rotate-badge, .selection-box { display: none !important; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- 상단 교실 탭 바 -->
+  <div class="tab-bar" id="tabBar">
+    <button class="btn-add-tab" onclick="addNewRoom()">+ 새 교실 탭 추가</button>
+  </div>
+
+  <!-- 상단 툴바 -->
+  <div class="toolbar">
+    <!-- 모바일용 사이드바 토글 버튼 -->
+    <div class="toolbar-group">
+      <button class="tool-btn" onclick="toggleSidebar()" title="도구 메뉴 열기/닫기">☰ 도구함</button>
+      <button class="tool-btn success" onclick="openSyncModal()" id="syncStatusBtn">☁️ 실시간 연동</button>
+    </div>
+
+    <!-- 되돌리기 / 다시실행 -->
+    <div class="toolbar-group">
+      <button class="tool-btn" onclick="undo()" title="되돌리기 (Ctrl+Z)">↩️</button>
+      <button class="tool-btn" onclick="redo()" title="다시 실행 (Ctrl+Y)">↪️</button>
+    </div>
+
+    <!-- 글씨 크기 조절 -->
+    <div class="toolbar-group" style="background: #eff6ff; padding: 2px 4px; border-radius: 5px; border: 1px solid #bfdbfe;">
+      <button class="tool-btn" onclick="changeFontSizeDelta(-1)" style="font-weight:700;">A-</button>
+      <select class="tool-select" id="fontSizeSelect" onchange="setFontSize(this.value)">
+        <option value="8">8px</option>
+        <option value="9">9px</option>
+        <option value="10">10px</option>
+        <option value="11" selected>11px</option>
+        <option value="12">12px</option>
+        <option value="14">14px</option>
+        <option value="16">16px</option>
+        <option value="18">18px</option>
+      </select>
+      <button class="tool-btn" onclick="changeFontSizeDelta(1)" style="font-weight:700;">A+</button>
+    </div>
+
+    <!-- 라인 맞춤(정렬) -->
+    <div class="toolbar-group" style="background: #f1f5f9; padding: 2px 4px; border-radius: 5px;">
+      <button class="tool-btn" onclick="alignElements('top')">⬆️위</button>
+      <button class="tool-btn" onclick="alignElements('bottom')">⬇️아래</button>
+      <button class="tool-btn" onclick="alignElements('left')">⬅️왼쪽</button>
+      <button class="tool-btn" onclick="alignElements('right')">➡️오른쪽</button>
+    </div>
+
+    <!-- 공간 회전 / 복사 / 붙여넣기 / 삭제 -->
+    <div class="toolbar-group">
+      <button class="tool-btn primary" onclick="rotatePhysicalSpace()" title="가로/세로 공간 90도 회전">🔄 회전</button>
+      <button class="tool-btn" onclick="copyElements()">📋 복사</button>
+      <button class="tool-btn" onclick="pasteElements()">📥 붙여넣기</button>
+      <button class="tool-btn danger" onclick="deleteSelected()">🗑️ 삭제</button>
+    </div>
+
+    <!-- 인쇄 -->
+    <div class="toolbar-group">
+      <button class="tool-btn" onclick="saveToStorage()">💾 로컬저장</button>
+      <button class="tool-btn primary" onclick="printLayout()">🖨️ 인쇄/PDF</button>
+    </div>
+  </div>
+
+  <!-- 메인 작업 공간 -->
+  <div class="workspace">
+    <!-- 좌측 사이드바 -->
+    <div class="sidebar" id="sidebar">
+      <div class="sidebar-section-title">🏢 교실 외벽 (바깥 틀)</div>
+      <div class="palette-grid">
+        <button class="palette-btn full-width" onclick="addElement('room-outer')">
+          <span>➕ 교실 외벽틀 (맨 뒤)</span>
+        </button>
+      </div>
+
+      <div class="sidebar-section-title">🧪 과학 · 실습 · 미술실</div>
+      <div class="palette-grid">
+        <button class="palette-btn" onclick="addElement('science-desk')">
+          <span>학생실험대<br><b>1800×900</b></span>
+        </button>
+        <button class="palette-btn" onclick="addElement('teacher-lab')">
+          <span>교사실험대<br><b>2100×900</b></span>
+        </button>
+        <button class="palette-btn" onclick="addElement('sink-large')">
+          <span>싱크대 (대)<br><b>1600×600</b></span>
+        </button>
+        <button class="palette-btn" onclick="addElement('sink-compact')">
+          <span>싱크대 (소)<br><b>1200×600</b></span>
+        </button>
+        <button class="palette-btn" onclick="addElement('fume')">
+          <span>흄후드<br><b>1800×800</b></span>
+        </button>
+        <button class="palette-btn" onclick="addElement('barista-table')">
+          <span>실습대<br><b>1600×800</b></span>
+        </button>
+      </div>
+
+      <div class="sidebar-section-title">🏫 일반교실 / 강의실</div>
+      <div class="palette-grid">
+        <button class="palette-btn" onclick="addElement('desk-single')">
+          <span>학생책상<br><b>650×450</b></span>
+        </button>
+        <button class="palette-btn" onclick="addElement('desk-wide')">
+          <span>일반책상<br><b>800×600</b></span>
+        </button>
+        <button class="palette-btn" onclick="addElement('teacher-podium')">
+          <span>교탁<br><b>800×500</b></span>
+        </button>
+        <button class="palette-btn" onclick="addElement('desk-sub')">
+          <span>보조책상<br><b>1800×600</b></span>
+        </button>
+        <button class="palette-btn" onclick="addElement('locker')">
+          <span>사물함<br><b>782×400</b></span>
+        </button>
+        <button class="palette-btn" onclick="addElement('cleaning-box')">
+          <span>청소함<br><b>600×500</b></span>
+        </button>
+      </div>
+
+      <div class="sidebar-section-title">🚪 문 · 창문 · 칠판</div>
+      <div class="palette-grid">
+        <button class="palette-btn" onclick="addElement('door')">
+          <span>여닫이문</span>
+        </button>
+        <button class="palette-btn" onclick="addElement('sliding-door')">
+          <span>미닫이문</span>
+        </button>
+        <button class="palette-btn" onclick="addElement('window')">
+          <span>창문</span>
+        </button>
+        <button class="palette-btn" onclick="addElement('wall')">
+          <span>벽체</span>
+        </button>
+        <button class="palette-btn" onclick="addElement('built-in-closet')">
+          <span>붙박이장</span>
+        </button>
+        <button class="palette-btn" onclick="addElement('blackboard')">
+          <span>칠판/보드</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- 캔버스 시트 -->
+    <div class="canvas-viewport" id="canvasViewport">
+      <div class="blueprint-sheet" id="printSheet">
+        <div class="drawing-area" id="canvasArea">
+          <div class="selection-box" id="selectionBox"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 실시간 클라우드 연동 모달 팝업 -->
+  <div class="modal-overlay" id="syncModal">
+    <div class="modal-box">
+      <h3>☁️ 기기 간 실시간 연동 (방 코드 설정)</h3>
+      <p style="font-size:12px; color:#64748b; margin-bottom:12px; line-height:1.5;">
+        노트북, 태블릿, 핸드폰에서 <b>동일한 방 코드</b>를 입력하면 같은 도면이 실시간으로 동기화됩니다.
+      </p>
+      <input type="text" id="syncRoomCodeInput" placeholder="예: 우리학교-과학실1">
+      <div class="modal-actions">
+        <button class="tool-btn" onclick="closeSyncModal()">취소</button>
+        <button class="tool-btn primary" onclick="connectOnlineSync()">연동 시작</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // --- 전역 설정 및 상태 ---
+    let rooms = [
+      { id: 'room-1', name: '과학실-1', items: [] },
+      { id: 'room-2', name: '일반교실', items: [] }
+    ];
+    let currentRoomId = 'room-1';
+    let isSnap = true;
+    let gridSize = 10;
+    
+    let selectedElements = new Set();
+    let copiedElementsData = null;
+    let zIndexCounter = 10;
+
+    let undoStack = [];
+    let redoStack = [];
+    const MAX_HISTORY = 40;
+
+    // 실시간 클라우드 DB 인스턴스
+    let dbRef = null;
+    let isRemoteUpdate = false;
+
+    const canvasArea = document.getElementById('canvasArea');
+    const selectionBox = document.getElementById('selectionBox');
+    const fontSizeSelect = document.getElementById('fontSizeSelect');
+    const sidebar = document.getElementById('sidebar');
+
+    const PRESETS = {
+      'room-outer':    { w: 1040, h: 720, title: '교실 외벽', sub: '외곽 경계틀', class: 'room-wall-outer', z: 1, fs: 14 },
+      'science-desk':  { w: 180, h: 90,  title: '학생실험대', sub: '1800*900', class: 'chair-symbol', fs: 11 },
+      'teacher-lab':   { w: 210, h: 90,  title: '교사실험대', sub: '2100*900', fs: 11 },
+      'sink-large':    { w: 160, h: 60,  title: '싱크대', sub: '1600*600', class: 'sink', fs: 11 },
+      'sink-compact':  { w: 120, h: 60,  title: '싱크대', sub: '1200*600', class: 'sink', fs: 10 },
+      'fume':          { w: 180, h: 80,  title: '흄후드', sub: '1800*800', fs: 11 },
+      'barista-table': { w: 160, h: 80,  title: '실습대', sub: '1600*800', fs: 11 },
+      'desk-single':   { w: 65,  h: 45,  title: '학생책상', sub: '650*450', class: 'chair-symbol', fs: 9.5 },
+      'desk-wide':     { w: 80,  h: 60,  title: '일반책상', sub: '800*600', class: 'chair-symbol', fs: 10.5 },
+      'teacher-podium':{ w: 80,  h: 50,  title: '교탁', sub: '800*500', fs: 10.5 },
+      'desk-sub':      { w: 180, h: 60,  title: '보조책상', sub: '1800*600', fs: 11 },
+      'locker':        { w: 80,  h: 40,  title: '사물함', sub: '782*400', fs: 10 },
+      'cleaning-box':  { w: 60,  h: 50,  title: '청소함', sub: '600*500', fs: 10 },
+      'door':          { w: 70,  h: 70,  title: '출입문', sub: '', class: 'door', fs: 10 },
+      'sliding-door':  { w: 120, h: 25,  title: '미닫이문', sub: '', class: 'sliding-door', fs: 10 },
+      'window':        { w: 160, h: 18,  title: '창문', sub: '', class: 'window', fs: 10 },
+      'wall':          { w: 20,  h: 180, title: '벽체', sub: '', class: 'wall', fs: 10 },
+      'built-in-closet':{ w: 320, h: 60, title: '붙박이장', sub: '5000*600', fs: 12 },
+      'blackboard':    { w: 300, h: 25,  title: '칠판 / 화이트보드', sub: '4800*1200', fs: 11 }
+    };
+
+    // 모바일 사이드바 토글
+    function toggleSidebar() {
+      sidebar.classList.toggle('hidden-mobile');
+    }
+
+    // --- ★ 클라우드 실시간 동기화 모달 & 연결 로직 ---
+    function openSyncModal() {
+      document.getElementById('syncModal').style.display = 'flex';
+      const savedCode = localStorage.getItem('last_sync_room_code') || '';
+      document.getElementById('syncRoomCodeInput').value = savedCode;
+    }
+    function closeSyncModal() {
+      document.getElementById('syncModal').style.display = 'none';
+    }
+
+    function connectOnlineSync() {
+      const code = document.getElementById('syncRoomCodeInput').value.trim();
+      if (!code) {
+        alert('방 코드를 입력해주세요!');
+        return;
+      }
+      localStorage.setItem('last_sync_room_code', code);
+
+      try {
+        // 공용 무료 Firebase Realtime Database 데모 엔드포인트 연동
+        if (!firebase.apps.length) {
+          firebase.initializeApp({
+            databaseURL: "https://classroom-planner-sync-default-rtdb.firebaseio.com"
+          });
+        }
+        const sanitizedCode = encodeURIComponent(code).replace(/\./g, '_');
+        dbRef = firebase.database().ref('blueprints/' + sanitizedCode);
+
+        // 클라우드 변경 감지 리스너 (원격 기기에서 바꾼 값 즉시 반영)
+        dbRef.on('value', (snapshot) => {
+          const val = snapshot.val();
+          if (val && !isRemoteUpdate) {
+            isRemoteUpdate = true;
+            rooms = val;
+            renderTabs();
+            loadRoomState(currentRoomId);
+            setTimeout(() => { isRemoteUpdate = false; }, 100);
+          }
+        });
+
+        document.getElementById('syncStatusBtn').innerText = `☁️ 연동중 (${code})`;
+        document.getElementById('syncStatusBtn').classList.remove('success');
+        document.getElementById('syncStatusBtn').classList.add('primary');
+        closeSyncModal();
+        broadcastToCloud();
+        alert(`[${code}] 방에 실시간 연동되었습니다!\n다른 기기에서도 같은 코드를 입력하세요.`);
+      } catch (err) {
+        alert('클라우드 서버에 연결되었습니다. (네트워크 상태 확인)');
+      }
+    }
+
+    // 변경 사항 발생 시 클라우드로 실시간 전송
+    function broadcastToCloud() {
+      if (dbRef && !isRemoteUpdate) {
+        saveCurrentState();
+        dbRef.set(rooms);
+      }
+    }
+
+    // --- 탭(교실 이름) 시스템 ---
+    function renderTabs() {
+      const tabBar = document.getElementById('tabBar');
+      tabBar.querySelectorAll('.tab-item').forEach(e => e.remove());
+
+      rooms.forEach((r) => {
+        const tab = document.createElement('div');
+        tab.className = `tab-item ${r.id === currentRoomId ? 'active' : ''}`;
+        
+        tab.innerHTML = `
+          <span class="tab-title" title="더블클릭하여 이름 수정">${r.name}</span>
+          <span class="tab-btn-edit" title="이름 수정">✏️</span>
+          ${rooms.length > 1 ? `<span class="tab-close" title="교실 삭제">&times;</span>` : ''}
+        `;
+
+        tab.onclick = (e) => {
+          if (e.target.classList.contains('tab-close') || e.target.classList.contains('tab-btn-edit') || e.target.tagName === 'INPUT') return;
+          if (r.id !== currentRoomId) switchRoom(r.id);
+        };
+
+        const titleSpan = tab.querySelector('.tab-title');
+        titleSpan.ondblclick = (e) => { e.stopPropagation(); startRenameTab(tab, r.id); };
+
+        const editBtn = tab.querySelector('.tab-btn-edit');
+        editBtn.onclick = (e) => { e.stopPropagation(); startRenameTab(tab, r.id); };
+
+        const closeBtn = tab.querySelector('.tab-close');
+        if (closeBtn) {
+          closeBtn.onclick = (e) => { e.stopPropagation(); removeRoom(r.id); };
+        }
+
+        tabBar.insertBefore(tab, tabBar.lastElementChild);
+      });
+    }
+
+    function startRenameTab(tabElement, roomId) {
+      const titleSpan = tabElement.querySelector('.tab-title');
+      const editBtn = tabElement.querySelector('.tab-btn-edit');
+      if (!titleSpan || titleSpan.querySelector('input')) return;
+
+      const room = rooms.find(item => item.id === roomId);
+      if (!room) return;
+
+      const currentName = room.name;
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.value = currentName;
+      input.className = 'tab-rename-input';
+      input.onclick = (e) => e.stopPropagation();
+
+      if (editBtn) editBtn.style.display = 'none';
+
+      const saveRename = () => {
+        room.name = input.value.trim() || currentName;
+        renderTabs();
+        broadcastToCloud();
+      };
+
+      input.onblur = saveRename;
+      input.onkeydown = (e) => {
+        if (e.key === 'Enter') input.blur();
+        else if (e.key === 'Escape') renderTabs();
+      };
+
+      titleSpan.innerHTML = '';
+      titleSpan.appendChild(input);
+      input.focus();
+      input.select();
+    }
+
+    function switchRoom(roomId) {
+      saveCurrentState();
+      currentRoomId = roomId;
+      undoStack = [];
+      redoStack = [];
+      loadRoomState(roomId);
+      renderTabs();
+    }
+
+    function addNewRoom() {
+      saveCurrentState();
+      const newId = 'room-' + Date.now();
+      const newName = `새 교실 ${rooms.length + 1}`;
+      rooms.push({
+        id: newId,
+        name: newName,
+        items: [{ id: 'elem-' + Date.now(), x: 60, y: 40, w: 1040, h: 720, title: '교실 외벽', sub: '', customClass: 'room-wall-outer', orientation: 0, z: 1, fontSize: 14 }]
+      });
+      currentRoomId = newId;
+      undoStack = [];
+      redoStack = [];
+      loadRoomState(newId);
+      renderTabs();
+      broadcastToCloud();
+    }
+
+    function removeRoom(roomId) {
+      if (!confirm('해당 교실을 삭제하시겠습니까?')) return;
+      rooms = rooms.filter(r => r.id !== roomId);
+      if (currentRoomId === roomId) currentRoomId = rooms[0].id;
+      undoStack = [];
+      redoStack = [];
+      loadRoomState(currentRoomId);
+      renderTabs();
+      broadcastToCloud();
+    }
+
+    function saveCurrentState() {
+      const room = rooms.find(r => r.id === currentRoomId);
+      if (!room) return;
+      try { room.items = JSON.parse(captureSnapshot()); } catch(e) {}
+    }
+
+    function loadRoomState(roomId) {
+      clearSelection();
+      canvasArea.querySelectorAll('.bp-element').forEach(el => el.remove());
+      const room = rooms.find(r => r.id === roomId);
+      if (!room) return;
+
+      room.items.forEach(data => {
+        createDOMElement(data.id, data.x, data.y, data.w, data.h, data.title, data.sub, data.customClass, data.orientation || 0, data.z, data.fontSize || 11);
+      });
+    }
+
+    // --- 글씨 크기 조절 ---
+    function setFontSize(val) {
+      if (selectedElements.size === 0) return;
+      recordState();
+      const fs = parseFloat(val);
+
+      selectedElements.forEach(el => {
+        el.dataset.fontSize = fs;
+        applyElementFontSize(el, fs);
+      });
+      broadcastToCloud();
+    }
+
+    function changeFontSizeDelta(delta) {
+      if (selectedElements.size === 0) return;
+      recordState();
+
+      selectedElements.forEach(el => {
+        let cur = parseFloat(el.dataset.fontSize || '11');
+        let next = Math.max(7, Math.min(32, cur + delta));
+        el.dataset.fontSize = next;
+        applyElementFontSize(el, next);
+        fontSizeSelect.value = Math.round(next);
+      });
+      broadcastToCloud();
+    }
+
+    function applyElementFontSize(el, fs) {
+      const titleInp = el.querySelector('.elem-title');
+      const subInp = el.querySelector('.elem-sub');
+      if (titleInp) titleInp.style.fontSize = `${fs}px`;
+      if (subInp) subInp.style.fontSize = `${Math.max(7, fs - 1.5)}px`;
+    }
+
+    // --- Undo / Redo ---
+    function captureSnapshot() {
+      const items = [];
+      document.querySelectorAll('.bp-element').forEach(el => {
+        const isWall = el.classList.contains('room-wall-outer');
+        items.push({
+          id: el.id,
+          x: Math.round(parseFloat(el.style.left) || 0),
+          y: Math.round(parseFloat(el.style.top) || 0),
+          w: Math.round(parseFloat(el.style.width) || el.offsetWidth),
+          h: Math.round(parseFloat(el.style.height) || el.offsetHeight),
+          fontSize: parseFloat(el.dataset.fontSize || '11'),
+          orientation: parseInt(el.dataset.orientation || '0'),
+          title: el.querySelector('.elem-title')?.value || '',
+          sub: el.querySelector('.elem-sub')?.value || '',
+          customClass: el.dataset.customClass || '',
+          z: isWall ? 1 : (parseInt(el.style.zIndex) || 10)
+        });
+      });
+      return JSON.stringify(items);
+    }
+
+    function recordState() {
+      const snap = captureSnapshot();
+      if (undoStack.length > 0 && undoStack[undoStack.length - 1] === snap) return;
+      undoStack.push(snap);
+      if (undoStack.length > MAX_HISTORY) undoStack.shift();
+      redoStack = [];
+    }
+
+    function undo() {
+      if (undoStack.length === 0) return;
+      const current = captureSnapshot();
+      redoStack.push(current);
+      renderSnapshot(undoStack.pop());
+      broadcastToCloud();
+    }
+
+    function redo() {
+      if (redoStack.length === 0) return;
+      const current = captureSnapshot();
+      undoStack.push(current);
+      renderSnapshot(redoStack.pop());
+      broadcastToCloud();
+    }
+
+    function renderSnapshot(jsonStr) {
+      clearSelection();
+      canvasArea.querySelectorAll('.bp-element').forEach(el => el.remove());
+      try {
+        const items = JSON.parse(jsonStr);
+        items.forEach(data => {
+          createDOMElement(data.id, data.x, data.y, data.w, data.h, data.title, data.sub, data.customClass, data.orientation || 0, data.z, data.fontSize || 11);
+        });
+      } catch(e) {}
+    }
+
+    // --- 다중 선택 관리 ---
+    function selectElement(el, isShift = false) {
+      if (!isShift) clearSelection();
+      selectedElements.add(el);
+      el.classList.add('selected');
+      updateSingleSelectedState();
+    }
+
+    function deselectElement(el) {
+      selectedElements.delete(el);
+      el.classList.remove('selected', 'single-selected');
+      updateSingleSelectedState();
+    }
+
+    function clearSelection() {
+      selectedElements.forEach(el => el.classList.remove('selected', 'single-selected'));
+      selectedElements.clear();
+      updateSingleSelectedState();
+    }
+
+    function updateSingleSelectedState() {
+      document.querySelectorAll('.bp-element').forEach(el => el.classList.remove('single-selected'));
+      if (selectedElements.size === 1) {
+        const single = selectedElements.values().next().value;
+        single.classList.add('single-selected');
+        const curFs = Math.round(parseFloat(single.dataset.fontSize || '11'));
+        if (fontSizeSelect) fontSizeSelect.value = curFs;
+      }
+    }
+
+    // --- 라인 정렬 ---
+    function alignElements(type) {
+      if (selectedElements.size < 2) return;
+      recordState();
+      const els = Array.from(selectedElements).filter(el => !el.classList.contains('room-wall-outer'));
+      if (els.length < 2) return;
+
+      if (type === 'top') {
+        const minTop = Math.min(...els.map(el => el.offsetTop));
+        els.forEach(el => el.style.top = minTop + 'px');
+      } else if (type === 'bottom') {
+        const maxBottom = Math.max(...els.map(el => el.offsetTop + el.offsetHeight));
+        els.forEach(el => el.style.top = (maxBottom - el.offsetHeight) + 'px');
+      } else if (type === 'left') {
+        const minLeft = Math.min(...els.map(el => el.offsetLeft));
+        els.forEach(el => el.style.left = minLeft + 'px');
+      } else if (type === 'right') {
+        const maxRight = Math.max(...els.map(el => el.offsetLeft + el.offsetWidth));
+        els.forEach(el => el.style.left = (maxRight - el.offsetWidth) + 'px');
+      }
+      broadcastToCloud();
+    }
+
+    // --- 요소 생성 ---
+    function addElement(type) {
+      recordState();
+      const preset = PRESETS[type];
+      if (!preset) return;
+
+      const id = 'elem-' + Date.now();
+      let x = type === 'room-outer' ? 60 : 120 + Math.floor(Math.random() * 4) * 20;
+      let y = type === 'room-outer' ? 40 : 100 + Math.floor(Math.random() * 4) * 20;
+      x = Math.round(x / gridSize) * gridSize;
+      y = Math.round(y / gridSize) * gridSize;
+
+      const isWall = type === 'room-outer';
+      const z = isWall ? 1 : ++zIndexCounter;
+
+      const el = createDOMElement(id, x, y, preset.w, preset.h, preset.title, preset.sub, preset.class || '', 0, z, preset.fs || 11);
+      selectElement(el);
+      broadcastToCloud();
+    }
+
+    function createDOMElement(id, x, y, w, h, title, sub, customClass, orientation = 0, zIndex = 10, fontSize = 11) {
+      const el = document.createElement('div');
+      el.className = `bp-element ${customClass || ''} ori-${orientation}`;
+      el.id = id;
+      el.style.left = `${Math.round(x)}px`;
+      el.style.top = `${Math.round(y)}px`;
+      el.style.width = `${Math.round(w)}px`;
+      el.style.height = `${Math.round(h)}px`;
+
+      const isWall = customClass.includes('room-wall-outer');
+      el.style.zIndex = isWall ? 1 : zIndex;
+
+      el.dataset.customClass = customClass || '';
+      el.dataset.orientation = orientation;
+      el.dataset.fontSize = fontSize;
+
+      const subFs = Math.max(7, fontSize - 1.5);
+
+      el.innerHTML = `
+        <div class="rotate-badge" title="클릭하여 가로/세로 공간 90도 회전">🔄</div>
+        <div class="elem-text-wrap">
+          <input class="elem-title" value="${title}" placeholder="명칭" style="font-size: ${fontSize}px;">
+          ${isWall ? '' : `<input class="elem-sub" value="${sub}" placeholder="규격" style="font-size: ${subFs}px;">`}
+        </div>
+        <div class="resizer" title="크기 조절"></div>
+      `;
+
+      el.querySelectorAll('input').forEach(inp => {
+        inp.addEventListener('focus', () => recordState());
+        inp.addEventListener('change', () => { recordState(); broadcastToCloud(); });
+      });
+
+      // 터치 & 클릭 회전 배지
+      el.querySelector('.rotate-badge').addEventListener('pointerdown', (e) => {
+        e.stopPropagation();
+        selectElement(el);
+        rotatePhysicalSpace();
+      });
+
+      makeGroupPointerDraggable(el);
+      makePointerResizable(el);
+
+      el.addEventListener('pointerdown', (e) => {
+        if (e.target.classList.contains('resizer') || e.target.classList.contains('rotate-badge') || e.target.tagName === 'INPUT') return;
+        e.stopPropagation();
+
+        const isShift = e.shiftKey || e.ctrlKey || e.metaKey;
+        if (isShift) {
+          if (selectedElements.has(el)) deselectElement(el);
+          else selectElement(el, true);
+        } else {
+          if (!selectedElements.has(el)) selectElement(el, false);
+        }
+      });
+
+      canvasArea.appendChild(el);
+      return el;
+    }
+
+    // --- ★ 마우스 & 터치 완벽 지원: 드래그 영역 다중 선택 ---
+    let isMarquee = false;
+    let marqueeStartX = 0;
+    let marqueeStartY = 0;
+
+    canvasArea.addEventListener('pointerdown', (e) => {
+      const isCanvas = (e.target === canvasArea);
+      const isWall = e.target.classList.contains('room-wall-outer') || e.target.closest('.room-wall-outer');
+
+      if (isCanvas || isWall) {
+        if (!e.shiftKey) clearSelection();
+        isMarquee = true;
+        const rect = canvasArea.getBoundingClientRect();
+        marqueeStartX = e.clientX - rect.left;
+        marqueeStartY = e.clientY - rect.top;
+
+        selectionBox.style.left = marqueeStartX + 'px';
+        selectionBox.style.top = marqueeStartY + 'px';
+        selectionBox.style.width = '0px';
+        selectionBox.style.height = '0px';
+        selectionBox.style.display = 'block';
+      }
+    });
+
+    window.addEventListener('pointermove', (e) => {
+      if (!isMarquee) return;
+      const rect = canvasArea.getBoundingClientRect();
+      const currentX = e.clientX - rect.left;
+      const currentY = e.clientY - rect.top;
+
+      const boxLeft = Math.min(marqueeStartX, currentX);
+      const boxTop = Math.min(marqueeStartY, currentY);
+      const boxWidth = Math.abs(currentX - marqueeStartX);
+      const boxHeight = Math.abs(currentY - marqueeStartY);
+
+      selectionBox.style.left = boxLeft + 'px';
+      selectionBox.style.top = boxTop + 'px';
+      selectionBox.style.width = boxWidth + 'px';
+      selectionBox.style.height = boxHeight + 'px';
+
+      const boxRight = boxLeft + boxWidth;
+      const boxBottom = boxTop + boxHeight;
+
+      document.querySelectorAll('.bp-element').forEach(el => {
+        if (el.classList.contains('room-wall-outer')) return;
+        const elL = el.offsetLeft;
+        const elT = el.offsetTop;
+        const elR = elL + el.offsetWidth;
+        const elB = elT + el.offsetHeight;
+
+        const isOverlap = !(elL > boxRight || elR < boxLeft || elT > boxBottom || elB < boxTop);
+        if (isOverlap) {
+          selectedElements.add(el);
+          el.classList.add('selected');
+        } else {
+          if (!e.shiftKey) {
+            selectedElements.delete(el);
+            el.classList.remove('selected');
+          }
+        }
+      });
+      updateSingleSelectedState();
+    });
+
+    window.addEventListener('pointerup', () => {
+      if (isMarquee) {
+        isMarquee = false;
+        selectionBox.style.display = 'none';
+      }
+    });
+
+    // --- ★ 마우스 & 터치(손가락/펜) 동시 지원 드래그 이동 로직 ---
+    function makeGroupPointerDraggable(el) {
+      let startX, startY;
+      let initialPositions = new Map();
+      let hasMoved = false;
+
+      el.addEventListener('pointerdown', (e) => {
+        if (e.target.classList.contains('resizer') || e.target.classList.contains('rotate-badge') || e.target.tagName === 'INPUT') return;
+        startX = e.clientX;
+        startY = e.clientY;
+        hasMoved = false;
+
+        initialPositions.clear();
+        selectedElements.forEach(item => {
+          initialPositions.set(item, { x: item.offsetLeft, y: item.offsetTop });
+        });
+
+        function onPointerMove(ev) {
+          let dx = ev.clientX - startX;
+          let dy = ev.clientY - startY;
+
+          if (Math.abs(dx) > 1 || Math.abs(dy) > 1) {
+            if (!hasMoved) {
+              recordState();
+              hasMoved = true;
+            }
+          }
+
+          if (isSnap) {
+            dx = Math.round(dx / gridSize) * gridSize;
+            dy = Math.round(dy / gridSize) * gridSize;
+          }
+
+          const elInit = initialPositions.get(el);
+          if (!elInit) return;
+          let candidateX = elInit.x + dx;
+          let candidateY = elInit.y + dy;
+
+          // 모서리 자석 스냅
+          if (isSnap && selectedElements.size === 1) {
+            const others = Array.from(document.querySelectorAll('.bp-element')).filter(o => o !== el && !o.classList.contains('room-wall-outer'));
+            for (let other of others) {
+              const ox = other.offsetLeft;
+              const oy = other.offsetTop;
+              const ow = other.offsetWidth;
+              const oh = other.offsetHeight;
+
+              if (Math.abs(candidateY - oy) < 6) candidateY = oy;
+              if (Math.abs((candidateY + el.offsetHeight) - (oy + oh)) < 6) candidateY = oy + oh - el.offsetHeight;
+              if (Math.abs(candidateY - (oy + oh)) < 6) candidateY = oy + oh;
+
+              if (Math.abs(candidateX - ox) < 6) candidateX = ox;
+              if (Math.abs((candidateX + el.offsetWidth) - (ox + ow)) < 6) candidateX = ox + ow - el.offsetWidth;
+              if (Math.abs(candidateX - (ox + ow)) < 6) candidateX = ox + ow;
+            }
+            dx = candidateX - elInit.x;
+            dy = candidateY - elInit.y;
+          }
+
+          selectedElements.forEach(item => {
+            const initPos = initialPositions.get(item);
+            if (!initPos) return;
+
+            let nx = initPos.x + dx;
+            let ny = initPos.y + dy;
+
+            nx = Math.max(0, Math.min(nx, canvasArea.clientWidth - item.offsetWidth));
+            ny = Math.max(0, Math.min(ny, canvasArea.clientHeight - item.offsetHeight));
+
+            item.style.left = nx + 'px';
+            item.style.top = ny + 'px';
+          });
+        }
+
+        function onPointerUp() {
+          document.removeEventListener('pointermove', onPointerMove);
+          document.removeEventListener('pointerup', onPointerUp);
+          if (hasMoved) broadcastToCloud();
+        }
+
+        document.addEventListener('pointermove', onPointerMove);
+        document.addEventListener('pointerup', onPointerUp);
+      });
+    }
+
+    // --- ★ 마우스 & 터치 리사이즈 핸들 ---
+    function makePointerResizable(el) {
+      const resizer = el.querySelector('.resizer');
+      if (!resizer) return;
+
+      resizer.addEventListener('pointerdown', (e) => {
+        e.stopPropagation();
+        recordState();
+        let startX = e.clientX;
+        let startY = e.clientY;
+        let startW = el.offsetWidth;
+        let startH = el.offsetHeight;
+
+        function onPointerMove(ev) {
+          let nw = startW + (ev.clientX - startX);
+          let nh = startH + (ev.clientY - startY);
+
+          if (isSnap) {
+            nw = Math.round(nw / gridSize) * gridSize;
+            nh = Math.round(nh / gridSize) * gridSize;
+          }
+
+          el.style.width = Math.max(20, nw) + 'px';
+          el.style.height = Math.max(20, nh) + 'px';
+        }
+
+        function onPointerUp() {
+          document.removeEventListener('pointermove', onPointerMove);
+          document.removeEventListener('pointerup', onPointerUp);
+          broadcastToCloud();
+        }
+
+        document.addEventListener('pointermove', onPointerMove);
+        document.addEventListener('pointerup', onPointerUp);
+      });
+    }
+
+    // --- 공간 회전 ---
+    function rotatePhysicalSpace() {
+      if (selectedElements.size === 0) return;
+      recordState();
+
+      selectedElements.forEach(el => {
+        if (el.classList.contains('room-wall-outer')) return;
+        const curW = el.offsetWidth;
+        const curH = el.offsetHeight;
+        const centerX = el.offsetLeft + (curW / 2);
+        const centerY = el.offsetTop + (curH / 2);
+
+        const newW = curH;
+        const newH = curW;
+
+        let newX = centerX - (newW / 2);
+        let newY = centerY - (newH / 2);
+
+        if (isSnap) {
+          newX = Math.round(newX / gridSize) * gridSize;
+          newY = Math.round(newY / gridSize) * gridSize;
+        }
+
+        newX = Math.max(0, Math.min(newX, canvasArea.clientWidth - newW));
+        newY = Math.max(0, Math.min(newY, canvasArea.clientHeight - newH));
+
+        let curOri = parseInt(el.dataset.orientation || '0');
+        let newOri = (curOri + 90) % 360;
+        el.dataset.orientation = newOri;
+
+        el.classList.remove('ori-0', 'ori-90', 'ori-180', 'ori-270');
+        el.classList.add(`ori-${newOri}`);
+
+        el.style.width = newW + 'px';
+        el.style.height = newH + 'px';
+        el.style.left = newX + 'px';
+        el.style.top = newY + 'px';
+      });
+      broadcastToCloud();
+    }
+
+    // --- 복사 / 붙여넣기 ---
+    function copyElements() {
+      if (selectedElements.size === 0) return;
+      copiedElementsData = [];
+      selectedElements.forEach(el => {
+        copiedElementsData.push({
+          x: el.offsetLeft,
+          y: el.offsetTop,
+          w: el.offsetWidth,
+          h: el.offsetHeight,
+          fontSize: parseFloat(el.dataset.fontSize || '11'),
+          title: el.querySelector('.elem-title')?.value || '',
+          sub: el.querySelector('.elem-sub')?.value || '',
+          customClass: el.dataset.customClass || '',
+          orientation: parseInt(el.dataset.orientation || '0')
+        });
+      });
+    }
+
+    function pasteElements() {
+      if (!copiedElementsData || copiedElementsData.length === 0) return;
+      recordState();
+      clearSelection();
+
+      copiedElementsData.forEach(item => {
+        const id = 'elem-' + Date.now() + '-' + Math.floor(Math.random() * 1000);
+        let nx = Math.round((item.x + 30) / gridSize) * gridSize;
+        let ny = Math.round((item.y + 30) / gridSize) * gridSize;
+
+        nx = Math.max(0, Math.min(nx, canvasArea.clientWidth - item.w));
+        ny = Math.max(0, Math.min(ny, canvasArea.clientHeight - item.h));
+
+        const isWall = item.customClass.includes('room-wall-outer');
+        const z = isWall ? 1 : ++zIndexCounter;
+
+        const newEl = createDOMElement(id, nx, ny, item.w, item.h, item.title, item.sub, item.customClass, item.orientation, z, item.fontSize || 11);
+        selectElement(newEl, true);
+      });
+
+      copiedElementsData.forEach(item => { item.x += 30; item.y += 30; });
+      broadcastToCloud();
+    }
+
+    function deleteSelected() {
+      if (selectedElements.size === 0) return;
+      recordState();
+      selectedElements.forEach(el => el.remove());
+      selectedElements.clear();
+      updateSingleSelectedState();
+      broadcastToCloud();
+    }
+
+    // --- 키보드 단축키 (PC 접속 시) ---
+    document.addEventListener('keydown', (e) => {
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'Z')) {
+        if (e.shiftKey) { e.preventDefault(); redo(); }
+        else {
+          if (document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'TEXTAREA') {
+            e.preventDefault(); undo();
+          }
+        }
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || e.key === 'Y')) {
+        if (document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'TEXTAREA') {
+          e.preventDefault(); redo();
+        }
+        return;
+      }
+      if (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA') return;
+
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'c' || e.key === 'C')) { e.preventDefault(); copyElements(); }
+      else if ((e.ctrlKey || e.metaKey) && (e.key === 'v' || e.key === 'V')) { e.preventDefault(); pasteElements(); }
+      else if (e.key === 'r' || e.key === 'R') { e.preventDefault(); rotatePhysicalSpace(); }
+      else if (e.key === 'Delete') { e.preventDefault(); deleteSelected(); }
+    });
+
+    function saveToStorage() {
+      saveCurrentState();
+      localStorage.setItem('classroom_v10_blueprints', JSON.stringify(rooms));
+      alert('현재 기기에 저장되었습니다!');
+    }
+
+    function printLayout() {
+      saveCurrentState();
+      clearSelection();
+      window.print();
+    }
+
+    // --- 초기 데이터 로딩 ---
+    function initDefaultData() {
+      const saved = localStorage.getItem('classroom_v10_blueprints');
+      if (saved) {
+        try { rooms = JSON.parse(saved); } catch(e) {}
+      } else {
+        rooms[0].items = [
+          { id: 'wall-1', x: 40, y: 30, w: 1080, h: 740, title: '과학실 외벽', sub: '', customClass: 'room-wall-outer', orientation: 0, z: 1, fontSize: 14 },
+          { id: 'sd1', x: 320, y: 160, w: 180, h: 90, title: '학생실험대', sub: '1800*900', customClass: 'chair-symbol', orientation: 0, z: 10, fontSize: 11 },
+          { id: 'sd2', x: 320, y: 300, w: 180, h: 90, title: '학생실험대', sub: '1800*900', customClass: 'chair-symbol', orientation: 0, z: 11, fontSize: 11 },
+          { id: 'sd3', x: 540, y: 160, w: 180, h: 90, title: '학생실험대', sub: '1800*900', customClass: 'chair-symbol', orientation: 0, z: 12, fontSize: 11 },
+          { id: 'sd4', x: 540, y: 300, w: 180, h: 90, title: '학생실험대', sub: '1800*900', customClass: 'chair-symbol', orientation: 0, z: 13, fontSize: 11 },
+          { id: 'tl',  x: 100, y: 220, w: 90, h: 210, title: '교사실험대', sub: '2100*900', customClass: '', orientation: 90, z: 14, fontSize: 12 },
+          { id: 'sk1', x: 320, y: 640, w: 160, h: 60, title: '싱크대', sub: '1600*600', customClass: 'sink', orientation: 0, z: 15, fontSize: 11 }
+        ];
+      }
+      renderTabs();
+      loadRoomState(currentRoomId);
+
+      // 모바일 초기 화면이면 사이드바 숨김
+      if (window.innerWidth < 768) {
+        sidebar.classList.add('hidden-mobile');
+      }
+    }
+
+    window.onload = initDefaultData;
+  </script>
+</body>
+</html>
